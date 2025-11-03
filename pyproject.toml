@@ -1,0 +1,123 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "setuptools_scm[toml]>=3.4.3",
+    "wheel",
+    "pyproject-flake8",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zlw"
+dynamic = ["version"]
+dependencies = [
+    # External packages
+    "numpy",
+    "scipy",
+]
+
+requires-python = ">=3.11"
+authors = [
+    { name = "James Kennington", email = "jameswkennington@gmail.com" },
+]
+description = "Zero Latency Whitening Utilities"
+readme = "README.md"
+license = { text = "MPL-2.0" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://git.ligo.org/james.kennington/zlw"
+Documentation = "https://docs.ligo.org/james.kennington/zlw"
+Issues = "https://git.ligo.org/james.kennington/zlw/issues"
+
+[project.scripts]
+zlw-sim-pop = "zlw.bin.sim_population:main"
+zlw-sim-acc = "zlw.bin.sim_accuracy:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "lalsuite",
+    "matplotlib",
+]
+qa = [
+    "gracedb-sdk",
+]
+lint = [
+    "black",
+    "flake8",
+    "flake8-bandit",
+    "flake8-black",
+    "flake8-bugbear",
+    "flake8-future-annotations",
+    "flake8-isort",
+    "flake8-logging-format",
+    "flake8-pyproject",
+    "isort",
+    "mypy",
+    "mypy-extensions",
+]
+dev = [
+    "zlw[lint]",
+    "zlw[test]",
+    "zlw[qa]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+zlw = [
+    "py.typed",
+]
+
+[tool.setuptools_scm]
+fallback_version = "v0.0.0"
+write_to = "src/zlw/_version.py"
+
+
+[tool.coverage.paths]
+source = [
+    "src/zlw/",
+    "*/zlw/",
+]
+
+[tool.coverage.report]
+omit = ["_version.py", "tests/*", "examples/*", "setup.py", "*/__init__.py"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+ignore_missing_imports = true
+exclude = [
+    "build",
+    "docs",
+]
+
+[tool.pytest.ini_options]
+addopts = "-p no:warnings --cov=zlw"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",
+    "S101",
+    "S406",
+]
+per-file-ignores = [
+    "__init__.py:F401",
+    "_version.py:BLK100",
+    "tests/*.py:E731",
+]
+exclude = [
+    "build",
+    "docs",
+    "_version.py",
+    "examples",
+]

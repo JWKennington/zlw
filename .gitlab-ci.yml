@@ -1,0 +1,15 @@
+include:
+  - component: git.ligo.org/computing/gitlab/components/python/sdist@1
+  - component: git.ligo.org/computing/gitlab/components/python/wheel@1
+  - component: git.ligo.org/computing/gitlab/components/python/code-quality@1
+    inputs:
+      requirements: ".[lint]"
+  - component: git.ligo.org/computing/gitlab/components/python/dependency-scanning@1
+  - component: git.ligo.org/computing/gitlab/components/python/type-checking@1
+  - component: git.ligo.org/computing/gitlab/components/python/test@1
+    inputs:
+      install_extra: test
+      python_versions:
+        - "3.10"
+        - "3.11"
+        - "3.12"
