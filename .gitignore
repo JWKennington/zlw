@@ -10,3 +10,8 @@ _version.py
 # IDE specific files
 .vscode/
 .idea/
+
+# Data files
+*.csv
+*.png
+*.ipynb

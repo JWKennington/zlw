@@ -23,7 +23,7 @@ class MPMPCorrection:
         freqs : np.ndarray
             One-sided frequency bins (Hz), length N_bins.
         psd1 : np.ndarray
-            One-sided PSD array S1(f) used for the linear-phase (template) filter.
+            One-sided PSD array S1(f) used for the minimum-phase (template) filter.
         psd2 : np.ndarray
             One-sided PSD array S2(f) used for the minimum-phase (data) filter.
         htilde : np.ndarray
@@ -52,7 +52,7 @@ class MPMPCorrection:
         self.n_fft = int((self.psd1.size - 1) * 2)
 
         # build whitening filters
-        # linear-phase filter: amplitude 1/sqrt(psd1), zero phase
+        # minimum-phase filter: amplitude 1/sqrt(psd1), zero phase
         self.mp1 = MPWhiteningFilter(self.psd1, self.fs, self.n_fft)
         # minimum-phase filter
         self.mp2 = MPWhiteningFilter(self.psd2, self.fs, self.n_fft)

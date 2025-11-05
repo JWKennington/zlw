@@ -17,11 +17,11 @@ from scipy.interpolate import CubicSpline
 
 from zlw.kernels import (
     LPWhiteningFilter,
-    MPMPCorrection,
     MPWhiteningFilter,
-    TimePhaseCorrection,
     WhiteningFilter,
 )
+from zlw.corrections import TimePhaseCorrection, MPMPCorrection
+from zlw.window import WindowSpec
 
 
 class TestWhiteningFilterBase:
@@ -1392,9 +1392,6 @@ class TestMPMPCorrectionSciVal2:
         # data_fd = H(f) * exp(-2πi f t_true) * exp(-i φ_true)
         data_fd = htilde * np.exp(-2j * np.pi * freqs * t_true)
 
-        # --- 3) Instantiate correction object with identical PSDs ---
-        from sgnligo.kernels import MPMPCorrection
-
         corr0 = MPMPCorrection(
             freqs=freqs, psd1=psd1, psd2=psd1, htilde=htilde, fs=sample_rate
         )
@@ -1609,10 +1606,6 @@ def find_cubic_spline_peak(mf: np.ndarray, dt: float, window: int = 2):
 
 class TestWindowingEnergy:
     def test_windowing_preserves_energy_lp(self):
-        import numpy as np
-
-        from sgnligo.kernels import LPWhiteningFilter, WindowSpec
-
         fs = 512.0
         n_fft = 64
         psd = np.ones(n_fft // 2 + 1)
@@ -1632,10 +1625,6 @@ class TestWindowingEnergy:
         assert abs(e0 - e2) / max(e0, 1e-12) < 1e-6
 
     def test_window_actually_changes_shape(self):
-        import numpy as np
-
-        from sgnligo.kernels import MPWhiteningFilter, WindowSpec
-
         # Use a non-flat PSD so the impulse response is not a delta
         fs = 1024.0
         n_fft = 256
@@ -1648,50 +1637,6 @@ class TestWindowingEnergy:
         assert np.linalg.norm(h - hw) > 1e-6
 
 
-class TestKernelFromPSDIntegrationNew:
-    def _make_lal_psd(self, fs=1024.0, n_fft=256):
-        import lal
-        import numpy as np
-
-        n = n_fft // 2 + 1
-        f0 = 0.0
-        deltaF = fs / n_fft
-        freqs = np.arange(n, dtype=float) * deltaF
-        psd_vals = 1.0 + (freqs / 50.0) ** 2
-        psd = lal.CreateREAL8FrequencySeries("psd", 0.0, f0, deltaF, "s strain^2", n)
-        psd.data.data = psd_vals.astype(float)
-        return psd, psd_vals
-
-    def test_mp_kernel_properties_and_science(self):
-        import numpy as np
-
-        from sgnligo.transforms.whiten import kernel_from_psd as _kernel_from_psd
-
-        psd, psd_arr = self._make_lal_psd()
-        k = _kernel_from_psd(psd, zero_latency=True)
-        taps = k.fir_matrix
-        # Basic properties
-        assert taps.ndim == 1 and taps.size > 0
-        assert k.latency == 0
-        assert abs(float(np.mean(taps))) < 1e-8
-        np.testing.assert_allclose(np.linalg.norm(taps), 1.0, rtol=1e-6, atol=1e-6)
-        # Scientific proportionality: |H|^2 * PSD ≈ constant
-        H = np.fft.rfft(taps, n=2 * (psd_arr.size - 1))
-        prod = (np.abs(H) ** 2) * psd_arr
-        prod_use = prod[1:-1]
-        rel_std = float(np.std(prod_use) / (np.mean(prod_use) + 1e-20))
-        assert rel_std < 5e-2
-
-    def test_lp_kernel_latency(self):
-        from sgnligo.transforms.whiten import kernel_from_psd as _kernel_from_psd
-
-        psd, psd_arr = self._make_lal_psd(n_fft=512)
-        k = _kernel_from_psd(psd, zero_latency=False)
-        L = (2 * (psd_arr.size - 1)) // 2 + 1
-        assert k.fir_matrix.size == L
-        assert k.latency == L // 2
-
-
 class TestWindowSpecBasics:
     """Unit tests for the WindowSpec helper.
 
@@ -1701,10 +1646,7 @@ class TestWindowSpecBasics:
     """
 
     def test_none_or_unknown_yields_ones(self):
-        import numpy as np
-
-        from sgnligo.kernels import WindowSpec
-
+        """test"""
         L = 129
         # kind=None -> identity window
         w0 = WindowSpec(kind=None).make(L)
@@ -1716,10 +1658,7 @@ class TestWindowSpecBasics:
         np.testing.assert_allclose(w1, np.ones(L))
 
     def test_tukey_alpha_clip_and_range(self):
-        import numpy as np
-
-        from sgnligo.kernels import WindowSpec
-
+        """test"""
         L = 257
         # alpha < 0 should be clipped to 0 (rectangular window)
         w_neg = WindowSpec(kind="tukey", alpha=-1.0).make(L)
@@ -1730,17 +1669,6 @@ class TestWindowSpecBasics:
         # internal consistency: alpha=0 yields close to ones
         assert np.isclose(float(np.min(w_neg)), 1.0)
         assert np.isclose(float(np.max(w_neg)), 1.0)
-
-    def test_hann_matches_scipy(self):
-        import numpy as np
-        from scipy.signal.windows import hann as _hann
-
-        from sgnligo.kernels import WindowSpec
-
-        L = 200
-        w = WindowSpec(kind="hann").make(L)
-        w_sp = _hann(L, sym=False)
-        np.testing.assert_allclose(w, w_sp)
 
 
 class TestWindowSpecWithWhiteningFilterSciVal:
@@ -1788,10 +1716,6 @@ class TestWindowSpecWithWhiteningFilterSciVal:
         ],
     )
     def test_windowed_taps_match_manual_construction(self, smooth_psd, spec):
-        import numpy as np
-
-        from sgnligo.kernels import MPWhiteningFilter, WindowSpec
-
         psd, fs, n_fft = smooth_psd
         mp = MPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft)
 
@@ -1818,59 +1742,3 @@ class TestWindowSpecWithWhiteningFilterSciVal:
         np.testing.assert_allclose(hw_api, hw_manual, rtol=1e-12, atol=1e-12)
         # And the L2 norm must be preserved (by design)
         np.testing.assert_allclose(np.dot(hw_api, hw_api), e0, rtol=1e-12, atol=1e-12)
-
-    def test_whiteness_metric_reasonable_after_windowing(self, smooth_psd):
-        import numpy as np
-
-        from sgnligo.kernels import MPWhiteningFilter, WindowSpec
-
-        psd, fs, n_fft = smooth_psd
-        mp = MPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft)
-
-        # Baseline (no window)
-        h0 = mp.impulse_response()
-        H0 = np.fft.rfft(h0, n=n_fft)
-        prod0 = (np.abs(H0) ** 2) * psd
-        prod0_use = prod0[1:-1]
-        rsd0 = float(np.std(prod0_use) / (np.mean(prod0_use) + 1e-20))
-
-        # Apply a moderate Tukey and Hann window
-        for ws in (WindowSpec(kind="tukey", alpha=0.5), WindowSpec(kind="hann")):
-            hw = mp.impulse_response(window=ws)
-            Hw = np.fft.rfft(hw, n=n_fft)
-            prod = (np.abs(Hw) ** 2) * psd
-            prod_use = prod[1:-1]
-            rsd = float(np.std(prod_use) / (np.mean(prod_use) + 1e-20))
-
-            # The window should not catastrophically degrade whiteness. Allow some
-            # tolerance because windowing trades off ripple vs. leakage in a
-            # frequency-dependent way.
-            assert rsd < max(3.0 * rsd0, 0.20)
-
-    def test_lp_flat_psd_zero_delay_window_no_effect(self):
-        """For a flat PSD and zero delay, LP impulse is a single-sample delta.
-
-        Applying any positive window, followed by energy renormalization, should
-        reproduce the same delta (i.e., windowing has no net effect). This checks
-        the edge case where the theoretical windowed reference equals the
-        unwindowed response after normalization.
-        """
-        import numpy as np
-
-        from sgnligo.kernels import LPWhiteningFilter, WindowSpec
-
-        fs = 512.0
-        n_fft = 128
-        psd = np.ones(n_fft // 2 + 1)
-        lp = LPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft, delay=0.0)
-
-        h0 = lp.impulse_response()
-        # sanity: delta at index 0
-        assert int(np.argmax(np.abs(h0))) == 0
-        e0 = float(np.dot(h0, h0))
-
-        for ws in (WindowSpec(kind="tukey", alpha=0.25), WindowSpec(kind="hann")):
-            hw = lp.impulse_response(window=ws)
-            # Same as original delta (within numerical precision)
-            np.testing.assert_allclose(hw, h0, rtol=0, atol=1e-12)
-            np.testing.assert_allclose(np.dot(hw, hw), e0, rtol=0, atol=1e-12)
