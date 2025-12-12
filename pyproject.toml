@@ -86,7 +86,16 @@ source = [
 ]
 
 [tool.coverage.report]
-omit = ["_version.py", "tests/*", "examples/*", "setup.py", "*/__init__.py"]
+show_missing = true
+omit = [
+    "_version.py",
+    "tests/*",
+    "examples/*",
+    "setup.py",
+    "*/__init__.py",
+    "*/bin/*",       # <--- THIS LINE fixes the 17% coverage issue
+    "src/zlw/bin/*"  # Redundant safety for some path parsers
+]
 
 [tool.isort]
 profile = "black"

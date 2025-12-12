@@ -1,42 +1,85 @@
 # zlw — Zero‑Latency Whitening utilities
 
-zlw is a small, focused package that provides zero‑latency whitening utilities for gravitational‑wave data analysis. It includes:
+[![Pipeline Status](https://git.ligo.org/james.kennington/zlw/badges/main/pipeline.svg)](https://git.ligo.org/james.kennington/zlw/-/pipelines)
+[![Coverage](https://git.ligo.org/james.kennington/zlw/badges/main/coverage.svg)](https://git.ligo.org/james.kennington/zlw/-/graphs/main/charts)
+[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 
-- Whitening filter utilities
-  - Minimum‑phase, zero‑latency whitening filters and helpers
-  - Supporting Fourier/window helpers for stable, real‑time responses
-- MP–MP scheme PSD drift correction terms
-  - Utilities to compute first‑ and second‑order timing and phase correction terms
-  - Tools to account for slow PSD mismatches between template and data
+**zlw** is a focused package for zero‑latency whitening in gravitational‑wave data analysis. It provides rigorous tools
+for:
 
-Where things live:
-- zlw.kernels: minimum‑phase whitening filter construction and frequency‑response utilities
-- zlw.fourier, zlw.window: helpers used by the whitening filters
-- zlw.corrections: MP–MP scheme PSD drift correction terms (class MPMPCorrection)
-- zlw/tests: basic tests (e.g., tests/test_kernels.py)
-- zlw/src/zlw/bin: small simulation/QA scripts
+- **Whitening Kernels:** Computing Minimum‑Phase (MP) filters that whiten data without introducing acausal latency.
+- **Perturbative Corrections:** Geometric drift correction terms for the MP–MP scheme. These calculate the precise
+  timing ($dt$) and phase ($d\phi$) biases introduced when the template PSD differs slightly from the real noise PSD.
 
-Quick examples
-- Whitening filter
-  
-  from zlw.kernels import MPWhiteningFilter
-  
-  # psd: one‑sided PSD array (Hz^-1), fs: sampling rate (Hz), n_fft: FFT length
-  wf = MPWhiteningFilter(psd, fs, n_fft)
-  Wf = wf.frequency_response()  # one‑sided frequency response (complex for min‑phase)
+## Installation
 
-- MP–MP correction terms
-  
-  import numpy as np
-  from zlw.corrections import MPMPCorrection
-  
-  # freqs: one‑sided frequency grid; psd1: data PSD; psd2: template PSD; htilde: template FFT
-  corr = MPMPCorrection(freqs=freqs, psd1=psd1, psd2=psd2, htilde=htilde, fs=fs)
-  # Simple first‑order corrections
-  dt1, dphi1 = corr.simplified_correction()
-  # Or the full second‑order set (includes cross terms)
-  (dt1, dphi1), (dt2, dphi2) = corr.full_correction()
+```bash
+pip install zlw
+```
 
-Notes
-- “Zero‑latency” refers to the use of minimum‑phase whitening filters so that the whitening operation does not introduce group delay in the time domain.
-- The MP–MP correction utilities follow the perturbative scheme that expands about the ratio of PSDs, providing drift terms for coalescence time and phase when the whitening filters differ slightly.
+## Structure
+
+- `zlw.kernels`: Construction of MP whitening filters and frequency response utilities.
+- `zlw.corrections`: Perturbative MP–MP correction terms (PerturbativeMPCorrection).
+- `zlw.fourier`, `zlw.window`: FFT and windowing backend helpers.
+- `zlw.bin`: Simulation and QA scripts.
+
+### Part 3: Example 1 (Whitening Filters)
+
+## Quick Examples
+
+### 1. Computing a Whitening Filter
+
+```python
+from zlw.kernels import MPWhiteningFilter
+
+# psd: One‑sided PSD array (Hz^-1)
+# fs: Sampling rate (Hz)
+# n_fft: FFT length (e.g., 4 * fs)
+wf = MPWhiteningFilter(psd, fs, n_fft)
+
+# Get the one‑sided complex frequency response
+# This response is minimum-phase (causal)
+Wf = wf.frequency_response()
+```
+
+### 2. Computing Perturbative Corrections
+
+If your template PSD (`psd2`) differs from the actual noise PSD (`psd1`), you can calculate the resulting geometric
+drift corrections.
+
+```python
+import numpy as np
+from zlw.corrections import PerturbativeMPCorrection
+
+# freqs:  One‑sided frequency grid
+# psd1:   Realization/Noise PSD (The truth)
+# psd2:   Template PSD (The model)
+# htilde: Template waveform (frequency domain)
+
+corr = PerturbativeMPCorrection(
+    freqs=freqs,
+    psd1=psd1,
+    psd2=psd2,
+    htilde=htilde,
+    fs=4096.0
+)
+
+# Calculate first-order geometric corrections
+results = corr.correction()
+
+print(f"Time Drift: {results.dt1:.4e} s")
+print(f"SNR Loss:   {results.dsnr1:.4f}")
+```
+
+### Development
+
+To install development dependencies and run the test suite (requires lalsuite):
+
+```bash
+# Install in editable mode with dev dependencies
+pip install -e .[dev]
+
+# Run tests
+pytest
+```
