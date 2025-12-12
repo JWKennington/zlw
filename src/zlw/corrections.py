@@ -15,27 +15,18 @@ TimePhaseCorrection = namedtuple("TimePhaseCorrection", "dt1 dt2 dphi1 dphi2 dsn
 
 
 @dataclass
-class MPMPCorrection:
-    r"""
-    First–order MP–MP timing, phase, and SNR corrections for whitening mismatch.
+class PertMpCorrection:
+    r"""First–order perturbative MP–MP timing, phase, and SNR corrections for whitening
+    mismatch.
 
     This class implements the *geometric* small–perturbation formulas for the
     MP–MP configuration.
-
-    ... [Same docstring as before] ...
-
-    Public API
-    ----------
-    - :meth:`dt1`   – first-order timing correction :math:`\delta t^{(1)}`.
-    - :meth:`dphi1` – first-order phase correction :math:`\delta\phi^{(1)}`.
-    - :meth:`dsnr1` – first-order fractional SNR change :math:`\delta\rho^{(1)}/\rho`.
-    - :meth:`correction` – return all in a :class:`TimePhaseCorrection`.
     """
 
     freqs: np.ndarray
     psd1: np.ndarray
     psd2: np.ndarray
-    htilde: np.ndarray
+    h_tilde: np.ndarray
     fs: float
 
     # --- derived / cached quantities (populated in __post_init__) ---
@@ -53,11 +44,11 @@ class MPMPCorrection:
         self.freqs = np.asarray(self.freqs, dtype=float)
         self.psd1 = np.asarray(self.psd1, dtype=float)
         self.psd2 = np.asarray(self.psd2, dtype=float)
-        self.htilde = np.asarray(self.htilde, dtype=complex)
+        self.h_tilde = np.asarray(self.h_tilde, dtype=complex)
 
         # Basic shape checks
         n = self.freqs.size
-        if not (self.psd1.size == self.psd2.size == self.htilde.size == n):
+        if not (self.psd1.size == self.psd2.size == self.h_tilde.size == n):
             raise ValueError(
                 "freqs, psd1, psd2, and htilde must all have the same length."
             )
@@ -100,7 +91,7 @@ class MPMPCorrection:
         """Precompute w(f) and the whitening phase difference Φ(f)."""
         # Effective spectral weight: |W2(f) * h(f)|^2
         # (Uses W2 to reflect the actual data whitening in the specific realization)
-        self.w_simple = np.abs(self.wk2 * self.htilde) ** 2
+        self.w_simple = np.abs(self.wk2 * self.h_tilde) ** 2
 
         # Whitening phase mismatch: Φ(f) = arg W2 − arg W1
         self.phi_diff = np.angle(self.wk2) - np.angle(self.wk1)

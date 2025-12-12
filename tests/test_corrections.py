@@ -17,7 +17,7 @@ import pytest
 from scipy.integrate import simpson
 
 # Adjust these imports if your module lives somewhere else
-from zlw.corrections import MPMPCorrection, TimePhaseCorrection
+from zlw.corrections import PertMpCorrection, TimePhaseCorrection
 from zlw.kernels import MPWhiteningFilter
 
 
@@ -192,7 +192,7 @@ class TestInitAndValidation:
         psd1, psd2 = simple_psds
         n = freqs_odd.size
 
-        corr = MPMPCorrection(
+        corr = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -224,7 +224,7 @@ class TestInitAndValidation:
         htilde = np.ones(50, dtype=complex)
 
         with pytest.raises(ValueError, match="same length"):
-            MPMPCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
 
     def test_init_raises_on_too_few_bins(self, fs):
         freqs = np.linspace(20.0, 30.0, 2)
@@ -233,7 +233,7 @@ class TestInitAndValidation:
         htilde = np.ones(2, dtype=complex)
 
         with pytest.raises(ValueError, match="at least 3"):
-            MPMPCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
 
     def test_init_raises_on_nonmonotonic_freqs(self, fs):
         freqs = np.array([100.0, 50.0, 200.0])  # nonmonotonic
@@ -242,7 +242,7 @@ class TestInitAndValidation:
         htilde = np.ones(3, dtype=complex)
 
         with pytest.raises(ValueError, match="strictly increasing"):
-            MPMPCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
 
     def test_init_raises_on_nonpositive_psd(self, fs):
         freqs = np.linspace(20.0, 30.0, 3)
@@ -251,7 +251,7 @@ class TestInitAndValidation:
         htilde = np.ones(3, dtype=complex)
 
         with pytest.raises(ValueError, match="strictly positive"):
-            MPMPCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ class TestScientificValidation:
         psd2 = np.ones(n)
         htilde = flat_template
 
-        corr = MPMPCorrection(
+        corr = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -315,7 +315,7 @@ class TestScientificValidation:
         psd1, psd2 = realistic_psds
         htilde = inspiral_like_template
 
-        corr = MPMPCorrection(
+        corr = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -378,7 +378,7 @@ class TestIntegrationAndInvariances:
         """
         psd1, psd2 = simple_psds
 
-        corr = MPMPCorrection(
+        corr = PertMpCorrection(
             freqs=freqs_even,
             psd1=psd1[: freqs_even.size],
             psd2=psd2[: freqs_even.size],
@@ -408,14 +408,14 @@ class TestIntegrationAndInvariances:
 
         A = 2.5
 
-        corr1 = MPMPCorrection(
+        corr1 = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
             h_tilde=htilde,
             fs=fs,
         )
-        corr2 = MPMPCorrection(
+        corr2 = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -442,14 +442,14 @@ class TestIntegrationAndInvariances:
 
         phi0 = 0.7
 
-        corr1 = MPMPCorrection(
+        corr1 = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
             h_tilde=htilde,
             fs=fs,
         )
-        corr2 = MPMPCorrection(
+        corr2 = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -483,7 +483,7 @@ class TestPublicAPI:
         psd1, psd2 = realistic_psds
         htilde = inspiral_like_template
 
-        corr = MPMPCorrection(
+        corr = PertMpCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -493,13 +493,15 @@ class TestPublicAPI:
 
         dt1_direct = corr.dt1()
         dphi1_direct = corr.dphi1()
+        dsnr1_direct = corr.dsnr1()
 
         result = corr.correction()
         assert isinstance(result, TimePhaseCorrection)
 
-        dt1, dt2, dphi1, dphi2 = result
+        dt1, dt2, dphi1, dphi2, dsnr = result
 
         assert dt1 == pytest.approx(dt1_direct)
         assert dphi1 == pytest.approx(dphi1_direct)
         assert dt2 == 0.0
         assert dphi2 == 0.0
+        assert dsnr == pytest.approx(dsnr1_direct)

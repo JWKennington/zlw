@@ -47,9 +47,6 @@ test = [
     "lalsuite",
     "matplotlib",
 ]
-qa = [
-    "gracedb-sdk",
-]
 lint = [
     "black",
     "flake8",
@@ -67,7 +64,6 @@ lint = [
 dev = [
     "zlw[lint]",
     "zlw[test]",
-    "zlw[qa]",
 ]
 
 [tool.setuptools.packages.find]
