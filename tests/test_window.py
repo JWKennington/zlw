@@ -895,7 +895,7 @@ class TestMPMPCorrection:
             freqs=freqs,
             psd1=psd1,
             psd2=psd2,
-            htilde=template_fd[1],
+            h_tilde=template_fd[1],
             fs=sample_rate,
         )
         assert isinstance(corr, MPMPCorrection)
@@ -908,7 +908,7 @@ class TestMPMPCorrection:
             freqs=freqs,
             psd1=psd1,
             psd2=psd2,
-            htilde=template_fd[1],
+            h_tilde=template_fd[1],
             fs=sample_rate,
         )
         # Partial derivs of unperturbed overlap
@@ -936,7 +936,7 @@ class TestMPMPCorrection:
             freqs=freqs,
             psd1=psd1,
             psd2=psd2,
-            htilde=template_fd[1],
+            h_tilde=template_fd[1],
             fs=sample_rate,
         )
         cv = corr.full_correction()
@@ -958,7 +958,7 @@ class TestMPMPCorrection:
             freqs=freqs,
             psd1=psd1,
             psd2=psd2,
-            htilde=template_fd[1],
+            h_tilde=template_fd[1],
             fs=sample_rate,
         )
         fc = corr.simplified_correction()
@@ -1393,7 +1393,7 @@ class TestMPMPCorrectionSciVal2:
         data_fd = htilde * np.exp(-2j * np.pi * freqs * t_true)
 
         corr0 = MPMPCorrection(
-            freqs=freqs, psd1=psd1, psd2=psd1, htilde=htilde, fs=sample_rate
+            freqs=freqs, psd1=psd1, psd2=psd1, h_tilde=htilde, fs=sample_rate
         )
 
         # --- 4) Whiten template & data with the same MP filter (wk1) ---
@@ -1449,7 +1449,7 @@ class TestMPMPCorrectionSciVal2:
 
         # 3) Instantiate MP–MP correction (PSD1 for template, PSD2 for data)
         corr = MPMPCorrection(
-            freqs=freqs, psd1=psd1, psd2=psd2, htilde=htilde, fs=sample_rate
+            freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=sample_rate
         )
 
         # 4) Whiten template & data
@@ -1525,7 +1525,7 @@ class TestMPMPCorrectionSciVal2:
 
         # --- instantiate MP–MP correction with tiny PSD bump ---
         corr = MPMPCorrection(
-            freqs=freqs, psd1=psd1, psd2=psd3, htilde=htilde, fs=sample_rate
+            freqs=freqs, psd1=psd1, psd2=psd3, h_tilde=htilde, fs=sample_rate
         )
 
         # --- whiten and form MF time series ---

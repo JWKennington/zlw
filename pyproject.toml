@@ -35,8 +35,10 @@ Documentation = "https://docs.ligo.org/james.kennington/zlw"
 Issues = "https://git.ligo.org/james.kennington/zlw/issues"
 
 [project.scripts]
-zlw-sim-pop = "zlw.bin.sim_population:main"
-zlw-sim-acc = "zlw.bin.sim_accuracy:main"
+zlw-sim-spa = "zlw.bin.sim_analytic:main"
+zlw-sim-psd = "zlw.bin.sim_psd:main"
+zlw-sim-cat = "zlw.bin.sim_catalog:main"
+zlw-sim-sky = "zlw.bin.sim_skymap:main"
 
 [project.optional-dependencies]
 test = [
