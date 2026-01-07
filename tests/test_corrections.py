@@ -17,7 +17,7 @@ import pytest
 from scipy.integrate import simpson
 
 # Adjust these imports if your module lives somewhere else
-from zlw.corrections import PertMpCorrection, TimePhaseCorrection
+from zlw.corrections import PrtPsdDriftCorrection, TimePhaseCorrection
 from zlw.kernels import MPWhiteningFilter
 
 
@@ -36,7 +36,11 @@ def _integrate(freqs: np.ndarray, arr: np.ndarray) -> float:
     if n % 2 == 1:
         return float(simpson(arr, freqs))
     else:
-        return float(np.trapz(arr, freqs))
+        # Handle NumPy 2.0+ removal of trapz
+        if hasattr(np, "trapezoid"):
+            return float(np.trapezoid(arr, freqs))
+        else:
+            return float(np.trapz(arr, freqs))
 
 
 def compute_full_first_order_biases(
@@ -192,7 +196,7 @@ class TestInitAndValidation:
         psd1, psd2 = simple_psds
         n = freqs_odd.size
 
-        corr = PertMpCorrection(
+        corr = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -224,7 +228,9 @@ class TestInitAndValidation:
         htilde = np.ones(50, dtype=complex)
 
         with pytest.raises(ValueError, match="same length"):
-            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PrtPsdDriftCorrection(
+                freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs
+            )
 
     def test_init_raises_on_too_few_bins(self, fs):
         freqs = np.linspace(20.0, 30.0, 2)
@@ -233,7 +239,9 @@ class TestInitAndValidation:
         htilde = np.ones(2, dtype=complex)
 
         with pytest.raises(ValueError, match="at least 3"):
-            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PrtPsdDriftCorrection(
+                freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs
+            )
 
     def test_init_raises_on_nonmonotonic_freqs(self, fs):
         freqs = np.array([100.0, 50.0, 200.0])  # nonmonotonic
@@ -242,7 +250,9 @@ class TestInitAndValidation:
         htilde = np.ones(3, dtype=complex)
 
         with pytest.raises(ValueError, match="strictly increasing"):
-            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PrtPsdDriftCorrection(
+                freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs
+            )
 
     def test_init_raises_on_nonpositive_psd(self, fs):
         freqs = np.linspace(20.0, 30.0, 3)
@@ -251,7 +261,9 @@ class TestInitAndValidation:
         htilde = np.ones(3, dtype=complex)
 
         with pytest.raises(ValueError, match="strictly positive"):
-            PertMpCorrection(freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs)
+            PrtPsdDriftCorrection(
+                freqs=freqs, psd1=psd1, psd2=psd2, h_tilde=htilde, fs=fs
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +295,7 @@ class TestScientificValidation:
         psd2 = np.ones(n)
         htilde = flat_template
 
-        corr = PertMpCorrection(
+        corr = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -315,7 +327,7 @@ class TestScientificValidation:
         psd1, psd2 = realistic_psds
         htilde = inspiral_like_template
 
-        corr = PertMpCorrection(
+        corr = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -378,7 +390,7 @@ class TestIntegrationAndInvariances:
         """
         psd1, psd2 = simple_psds
 
-        corr = PertMpCorrection(
+        corr = PrtPsdDriftCorrection(
             freqs=freqs_even,
             psd1=psd1[: freqs_even.size],
             psd2=psd2[: freqs_even.size],
@@ -408,14 +420,14 @@ class TestIntegrationAndInvariances:
 
         A = 2.5
 
-        corr1 = PertMpCorrection(
+        corr1 = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
             h_tilde=htilde,
             fs=fs,
         )
-        corr2 = PertMpCorrection(
+        corr2 = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -442,14 +454,14 @@ class TestIntegrationAndInvariances:
 
         phi0 = 0.7
 
-        corr1 = PertMpCorrection(
+        corr1 = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
             h_tilde=htilde,
             fs=fs,
         )
-        corr2 = PertMpCorrection(
+        corr2 = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
@@ -483,7 +495,7 @@ class TestPublicAPI:
         psd1, psd2 = realistic_psds
         htilde = inspiral_like_template
 
-        corr = PertMpCorrection(
+        corr = PrtPsdDriftCorrection(
             freqs=freqs_odd,
             psd1=psd1,
             psd2=psd2,
