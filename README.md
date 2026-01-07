@@ -50,14 +50,14 @@ drift corrections.
 
 ```python
 import numpy as np
-from zlw.corrections import PertMpCorrection
+from zlw.corrections import PrtPsdDriftCorrection
 
 # freqs:  One‑sided frequency grid
 # psd1:   Realization/Noise PSD (The truth)
 # psd2:   Template PSD (The model)
 # htilde: Template waveform (frequency domain)
 
-corr = PertMpCorrection(
+corr = PrtPsdDriftCorrection(
     freqs=freqs,
     psd1=psd1,
     psd2=psd2,

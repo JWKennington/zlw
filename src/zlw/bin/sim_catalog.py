@@ -46,7 +46,7 @@ except ImportError:
 
 # --- Project Libraries ---
 try:
-    from zlw.corrections import PertMpCorrection
+    from zlw.corrections import PrtPsdDriftCorrection
 except ImportError:
     print("Error: 'zlw' package not found in path.", file=sys.stderr)
     sys.exit(1)
@@ -376,7 +376,7 @@ def analyze_event(row: pd.Series, cfg: AnalysisConfig) -> Tuple[List[dict], dict
             if np.any(psd1 <= 0) or np.any(psd2 <= 0) or np.any(np.isnan(psd1)):
                 continue
 
-            corrector = PertMpCorrection(freqs, psd1, psd2, h_tilde, 4096)
+            corrector = PrtPsdDriftCorrection(freqs, psd1, psd2, h_tilde, 4096)
             bias = corrector.correction()
 
             drift_arr = np.abs(np.sqrt(psd1 / psd2) - 1.0)

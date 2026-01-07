@@ -39,6 +39,9 @@ zlw-sim-spa = "zlw.bin.sim_analytic:main"
 zlw-sim-psd = "zlw.bin.sim_psd:main"
 zlw-sim-cat = "zlw.bin.sim_catalog:main"
 zlw-sim-sky = "zlw.bin.sim_skymap:main"
+# Exact analysis scripts
+zlw-ext-trc = "zlw.bin.exact.truncation_error:main"
+zlw-dat-trc = "zlw.bin.exact.truncation_error_gwosc:main"
 
 [project.optional-dependencies]
 test = [
