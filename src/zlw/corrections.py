@@ -303,7 +303,7 @@ class ExtPsdDriftCorrection:
 
         # 4. Apply Window
         if window is not None:
-            win_arr = window.make(len(kernel))
+            win_arr = window.make(len(kernel), center=0.0)
             kernel *= win_arr
 
         return kernel
@@ -378,7 +378,7 @@ class ExtPsdDriftCorrection:
             # Generate window of length L (e.g. Tukey)
             # This window applies to time 0...L-1 (magnitude).
             # We map this to buffer indices 0, N-1, N-2...
-            w_taps = window.make(L)
+            w_taps = window.make(L, center=0.0)
 
             # Apply w[0] to k[0]
             mask[0] = w_taps[0]

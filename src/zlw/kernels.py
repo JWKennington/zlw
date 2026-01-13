@@ -57,6 +57,13 @@ class WhiteningFilter:
                 f"PSD length must be n_fft//2 + 1 ({expected}); got {self.psd.size}"
             )
 
+    @property
+    def peak_center(self) -> float:
+        """The expected location (index) of the impulse response peak.
+        Defaults to 0.0 (Minimum Phase / Causal).
+        """
+        return 0.0
+
     def amplitude_response(self) -> numpy.ndarray:
         """Compute the one-sided amplitude response |H(f)| = 1/sqrt(psd).
 
@@ -86,7 +93,7 @@ class WhiteningFilter:
         return numpy.angle(H)
 
     def impulse_response(
-            self, inverse: bool = False, window: Optional[WindowSpec] = None
+        self, inverse: bool = False, window: Optional[WindowSpec] = None
     ) -> numpy.ndarray:
         """Compute the real-valued, time-domain impulse response via inverse FFT.
 
@@ -112,8 +119,9 @@ class WhiteningFilter:
             H = 1.0 / H_safe
 
         h = self.fb.irfft(H, n=self.n_fft)
-        if window is not None and window.kind is not None:
-            w = window.make(h.size)
+        if window is not None:
+            w = window.make(h.size, center=self.peak_center)
+
             # Preserve energy of the unwindowed taps
             e0 = float(numpy.dot(h, h))
             if e0 > 0.0:
@@ -149,6 +157,11 @@ class LPWhiteningFilter(WhiteningFilter):
     """
 
     delay: float = 0.0
+
+    @property
+    def peak_center(self) -> float:
+        """For Linear Phase, the peak is at the specified delay."""
+        return self.delay * self.fs
 
     def phase_response(self) -> numpy.ndarray:
         """Compute the phase response φ(f) = -2πf delay.
@@ -186,9 +199,9 @@ class MPWhiteningFilter(WhiteningFilter):
     """Minimum-phase whitening filter via folded-cepstrum method."""
 
     def _dht_folded_cepstrum(
-            self,
-            data: numpy.ndarray,
-            full_spectrum: bool = False,
+        self,
+        data: numpy.ndarray,
+        full_spectrum: bool = False,
     ) -> numpy.ndarray:
         """Helper method to compute the discrete Hilbert transform via
         the folded cepstrum method. Here we follow the steps proven
@@ -214,7 +227,7 @@ class MPWhiteningFilter(WhiteningFilter):
         # Preserve the Nyquist quefrency component (if applicable)
         folded[self.n_fft // 2] = cepstrum[self.n_fft // 2]
         # Double the positive quefrencies (preserving the energy of the signal)
-        folded[1: self.n_fft // 2] = 2 * cepstrum[1: self.n_fft // 2]
+        folded[1 : self.n_fft // 2] = 2 * cepstrum[1 : self.n_fft // 2]
 
         # 3. Compute the complex DHT via FFT
         freq_response = self._fft(folded)
@@ -252,7 +265,7 @@ class MPWhiteningFilter(WhiteningFilter):
         # Compute two-sided log spectrum
         log_amp_res_full = numpy.zeros(self.n_fft, dtype=numpy.float64)
         log_amp_res_full[: self.n_fft // 2 + 1] = log_amp_res
-        log_amp_res_full[self.n_fft // 2 + 1:] = log_amp_res[1: self.n_fft // 2][::-1]
+        log_amp_res_full[self.n_fft // 2 + 1 :] = log_amp_res[1 : self.n_fft // 2][::-1]
 
         # 2. Compute the log frequency response
         #    via the folded cepstrum method
