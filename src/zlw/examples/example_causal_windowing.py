@@ -16,20 +16,19 @@ We generate three key diagnostic plots:
      effective bandwidth and windowing side-effects.
 
 Usage:
-    python src/zlw/examples/example_window_diagnostics.py
+    python src/zlw/examples/example_causal_windowing.py
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import fftconvolve, butter, sosfilt, welch, correlate
-import textwrap
 
 # GWPY for easy access to open data
 from gwpy.timeseries import TimeSeries
 
 # ZLW imports
 from zlw.kernels import MPWhiteningFilter, LPWhiteningFilter
-from zlw.window import Tukey, Hann, WindowSpec
+from zlw.window import Hann
 
 
 def fetch_h1_data(target_gps: float, duration: float = 64.0) -> TimeSeries:
@@ -93,11 +92,11 @@ def whiten_with_windows(
     lwf = LPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft, delay=center_delay)
 
     # 2. Compute Windowed Impulse Responses
-    #    We use a generic Tukey(alpha=0.25).
+    #    We use Hann to demonstrate robust tapering.
     #    The ZLW library automatically aligns this window:
-    #      - MP gets a "Half-Window" (1.0 at index 0, tapering right).
-    #      - LP gets a Symmetric Window centered at delay.
-    win_spec = Tukey(alpha=0.25)
+    #      - MP gets a "Half-Hann" (1.0 at index 0, tapering to right).
+    #      - LP gets a Symmetric Hann centered at the delay.
+    win_spec = Hann()
 
     mp_kernel = mwf.impulse_response(window=win_spec)
     lp_kernel = lwf.impulse_response(window=win_spec)
@@ -107,7 +106,7 @@ def whiten_with_windows(
     mp_raw = fftconvolve(strain, mp_kernel, mode="same")
     lp_raw = fftconvolve(strain, lp_kernel, mode="same")
 
-    # 4. Normalize (Generic trimming)
+    # 4. Normalize (Generic trimming of startup transients)
     settle = int(kernel_duration * fs)
     valid_slice = slice(settle, -settle)
 
@@ -181,7 +180,7 @@ def plot_diagnostics(results: dict, gps_time: float):
     ax_time.plot(
         t_axis,
         mp_data,
-        label="MP (Causal Window)",
+        label="MP (Causal Hann)",
         color="#1f77b4",
         linewidth=0.1,
         alpha=0.9,
@@ -189,7 +188,7 @@ def plot_diagnostics(results: dict, gps_time: float):
     ax_time.plot(
         t_axis,
         lp_data,
-        label="LP (Symmetric Window)",
+        label="LP (Symmetric Hann)",
         color="#ff7f0e",
         linewidth=0.1,
         alpha=0.6,
@@ -225,7 +224,7 @@ def plot_diagnostics(results: dict, gps_time: float):
     ax_acf.set_ylabel("Normalized Correlation")
     ax_acf.legend()
     ax_acf.grid(alpha=0.3)
-    # Zoom to show the "diamond" structure near zero lag
+    # Zoom to show the structure near zero lag
     ax_acf.set_xlim(-100, 100)
 
     plt.tight_layout()
@@ -244,8 +243,14 @@ def main():
 
     # 2. PSD
     psd_vals = data.psd(fftlength=8.0, method="median", window="hann").value
-    # Clamp PSD to avoid NaNs in filter
+
+    # --- CRITICAL FIX: Zero DC Gain ---
+    # To prevent integrator drift (which causes the "Diamond of Death" ACF),
+    # we must ensure the whitening filter has ZERO gain at DC.
+    # Gain ~ 1/sqrt(PSD). So we set PSD[0] to a massive finite number.
+    # Note: We avoid np.inf to prevent NaNs in homomorphic filtering logic.
     psd_vals = np.maximum(psd_vals, 1e-50)
+    psd_vals[0] = 1e40  # Gain at DC becomes ~1e-20 (effectively zero)
 
     # 3. Whiten with new Windowing logic
     results = whiten_with_windows(

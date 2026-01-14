@@ -198,6 +198,9 @@ class LPWhiteningFilter(WhiteningFilter):
 class MPWhiteningFilter(WhiteningFilter):
     """Minimum-phase whitening filter via folded-cepstrum method."""
 
+    clamp_log_min: float = -700.0
+    clamp_log_max: float = 700.0
+
     def _dht_folded_cepstrum(
         self,
         data: numpy.ndarray,
@@ -258,9 +261,22 @@ class MPWhiteningFilter(WhiteningFilter):
             np.ndarray: complex minimum-phase frequency response.
         """
         # 1. Compute the log-amplitude response
+        #    We use careful error handling for zeros (log -> -inf)
+        #    or infinities (log -> +inf).
+
+        with numpy.errstate(divide="ignore", invalid="ignore"):
+            log_psd = numpy.log(self.psd)
+
+        # Clamp huge values to preserve FFT stability.
+        # Clamping to +/- 700 preserves full float64 dynamic range without NaNs.
+        log_psd = numpy.nan_to_num(
+            log_psd, posinf=self.clamp_log_max, neginf=self.clamp_log_min
+        )
+
+        # 1. Compute the log-amplitude response
         #    Note that the below is equivalent to
         #    log_spectrum = np.log(self.amplitude_response())
-        log_amp_res = -0.5 * numpy.log(self.psd)
+        log_amp_res = -0.5 * log_psd
 
         # Compute two-sided log spectrum
         log_amp_res_full = numpy.zeros(self.n_fft, dtype=numpy.float64)
