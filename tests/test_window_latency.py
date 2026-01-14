@@ -10,10 +10,9 @@ Verifies that:
 
 import numpy as np
 import pytest
-from scipy.signal import get_window
 
-from zlw.window import WindowSpec, Tukey, Hann, Epanechnikov, IdentityWindow
-from zlw.kernels import MPWhiteningFilter, LPWhiteningFilter, NumpyFourierBackend
+from zlw.kernels import LPWhiteningFilter, MPWhiteningFilter
+from zlw.window import Epanechnikov, Hann, IdentityWindow, Tukey
 
 
 # ---------------------------------------------------------------------------

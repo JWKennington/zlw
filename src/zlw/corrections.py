@@ -1,19 +1,19 @@
+"""
+Convenience container for returning timing / phase / SNR corrections.
+"""
+
 from __future__ import annotations
 
 import warnings
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 
-import numpy as np
-from scipy.integrate import simpson
-from scipy.ndimage import gaussian_filter1d
-
+import array_api_signal as aps
 from zlw.kernels import MPWhiteningFilter
 from zlw.window import WindowSpec
 
 #: Convenience container for returning timing / phase / SNR corrections.
-# Added 'dsnr1' to the tuple
 TimePhaseCorrection = namedtuple("TimePhaseCorrection", "dt1 dt2 dphi1 dphi2 dsnr1")
 
 
@@ -26,32 +26,35 @@ class PrtPsdDriftCorrection:
     MP–MP configuration.
     """
 
-    freqs: np.ndarray
-    psd1: np.ndarray
-    psd2: np.ndarray
-    h_tilde: np.ndarray
+    freqs: Any
+    psd1: Any
+    psd2: Any
+    h_tilde: Any
     fs: float
 
     # --- derived / cached quantities (populated in __post_init__) ---
     df: float = None
     n_fft: int = None
-    wk1: np.ndarray = None
-    wk2: np.ndarray = None
-    w_simple: np.ndarray = None
-    phi_diff: np.ndarray = None
+    wk1: Any = None
+    wk2: Any = None
+    w_simple: Any = None
+    phi_diff: Any = None
     eps: float = None
 
     def __post_init__(self) -> None:
         """Validate inputs, build MP whiteners, and precompute weights."""
-        # Coerce to numpy arrays
-        self.freqs = np.asarray(self.freqs, dtype=float)
-        self.psd1 = np.asarray(self.psd1, dtype=float)
-        self.psd2 = np.asarray(self.psd2, dtype=float)
-        self.h_tilde = np.asarray(self.h_tilde, dtype=complex)
+        # 1. Infer Backend
+        self.xp = aps.array_namespace(self.freqs)
+
+        # 2. Coerce inputs
+        self.freqs = self.xp.asarray(self.freqs)
+        self.psd1 = self.xp.asarray(self.psd1)
+        self.psd2 = self.xp.asarray(self.psd2)
+        self.h_tilde = self.xp.asarray(self.h_tilde)
 
         # Basic shape checks
-        n = self.freqs.size
-        if not (self.psd1.size == self.psd2.size == self.h_tilde.size == n):
+        n = self.freqs.shape[0]
+        if not (self.psd1.shape[0] == self.psd2.shape[0] == self.h_tilde.shape[0] == n):
             raise ValueError(
                 "freqs, psd1, psd2, and htilde must all have the same length."
             )
@@ -59,11 +62,13 @@ class PrtPsdDriftCorrection:
             raise ValueError("Need at least 3 frequency bins for integration.")
 
         # Monotonic frequency grid
-        if not np.all(np.diff(self.freqs) > 0):
+        # diff > 0 check
+        diffs = self.xp.diff(self.freqs)
+        if not self.xp.all(diffs > 0):
             raise ValueError("freqs must be strictly increasing (one-sided grid).")
 
         # PSD sanity
-        if np.any(self.psd1 <= 0) or np.any(self.psd2 <= 0):
+        if self.xp.any(self.psd1 <= 0) or self.xp.any(self.psd2 <= 0):
             raise ValueError("psd1 and psd2 must be strictly positive everywhere.")
 
         # Frequency bin width
@@ -79,8 +84,8 @@ class PrtPsdDriftCorrection:
         self._precompute_weight_and_phase()
 
         # Perturbativity diagnostic
-        eps_arr = np.sqrt(self.psd1 / self.psd2) - 1.0
-        self.eps = float(np.max(np.abs(eps_arr)))
+        eps_arr = self.xp.sqrt(self.psd1 / self.psd2) - 1.0
+        self.eps = float(self.xp.max(self.xp.abs(eps_arr)))
 
     def _build_mp_filters(self) -> None:
         """Construct MP whitening filters and cache one-sided responses."""
@@ -93,24 +98,27 @@ class PrtPsdDriftCorrection:
     def _precompute_weight_and_phase(self) -> None:
         """Precompute w(f) and the whitening phase difference Φ(f)."""
         # Effective spectral weight: |W2(f) * h(f)|^2
-        # (Uses W2 to reflect the actual data whitening in the specific realization)
-        self.w_simple = np.abs(self.wk2 * self.h_tilde) ** 2
+        self.w_simple = self.xp.abs(self.wk2 * self.h_tilde) ** 2
 
         # Whitening phase mismatch: Φ(f) = arg W2 − arg W1
-        self.phi_diff = np.angle(self.wk2) - np.angle(self.wk1)
+        # Use aps.angle or fallback logic
+        arg_wk2 = (
+            self.xp.angle(self.wk2)
+            if hasattr(self.xp, "angle")
+            else self.xp.atan2(self.xp.imag(self.wk2), self.xp.real(self.wk2))
+        )
+        arg_wk1 = (
+            self.xp.angle(self.wk1)
+            if hasattr(self.xp, "angle")
+            else self.xp.atan2(self.xp.imag(self.wk1), self.xp.real(self.wk1))
+        )
 
-    def _integrate(self, arr: np.ndarray) -> float:
+        self.phi_diff = arg_wk2 - arg_wk1
+
+    def _integrate(self, arr: Any) -> float:
         """Numerically integrate ``arr(f)`` over ``self.freqs``."""
-        arr = np.asarray(arr, dtype=float)
-        n = arr.size
-        if n % 2 == 1:
-            return float(simpson(arr, self.freqs))
-        else:
-            # Handle NumPy 2.0+ removal of trapz
-            if hasattr(np, "trapezoid"):
-                return float(np.trapezoid(arr, self.freqs))
-            else:
-                return float(np.trapz(arr, self.freqs))
+        # Use array-api-signal's simpson
+        return float(self.xp.simpson(arr, x=self.freqs))
 
     def dt1(self) -> float:
         r"""First-order timing correction :math:`\delta t^{(1)}` (seconds)."""
@@ -118,7 +126,9 @@ class PrtPsdDriftCorrection:
         den = self._integrate(self.freqs**2 * self.w_simple)
         if den == 0.0:
             return 0.0
-        return (1.0 / (2.0 * np.pi)) * num / den
+        # 1.0 / (2 * pi)
+        val = (1.0 / (2.0 * 3.141592653589793)) * num / den
+        return float(val)
 
     def dphi1(self) -> float:
         r"""First-order phase correction :math:`\delta\phi^{(1)}` (radians)."""
@@ -126,30 +136,21 @@ class PrtPsdDriftCorrection:
         den = self._integrate(self.w_simple)
         if den == 0.0:
             return 0.0
-        return num / den
+        return float(num / den)
 
     def dsnr1(self) -> float:
-        r"""First-order fractional SNR change :math:`\delta\rho^{(1)}/\rho`.
-
-        Calculated as the power-weighted average of the log-magnitude difference:
-
-        .. math::
-            \frac{\delta\rho}{\rho} \approx
-            \frac{\int w(f) \ln(|W_2(f)|/|W_1(f)|)\,df}
-                 {\int w(f)\,df}
-
-        where :math:`|W_2|/|W_1| = \sqrt{S_1/S_2}`. A negative value implies
-        sensitivity loss due to the PSD mismatch.
-        """
+        r"""First-order fractional SNR change :math:`\delta\rho^{(1)}/\rho`."""
         # ln(|W2|) - ln(|W1|)
-        log_mag_diff = np.log(np.abs(self.wk2)) - np.log(np.abs(self.wk1))
+        log_mag_diff = self.xp.log(self.xp.abs(self.wk2)) - self.xp.log(
+            self.xp.abs(self.wk1)
+        )
 
         num = self._integrate(self.w_simple * log_mag_diff)
         den = self._integrate(self.w_simple)
 
         if den == 0.0:
             return 0.0
-        return num / den
+        return float(num / den)
 
     def correction(self) -> TimePhaseCorrection:
         """Return the first-order MP–MP corrections."""
@@ -163,86 +164,73 @@ class PrtPsdDriftCorrection:
 
 
 class AliasingWarning(UserWarning):
-    """Warning raised when a kernel exhibits potential time-domain aliasing (wrap-around)."""
+    """Warning raised when a kernel exhibits potential time-domain aliasing."""
 
     pass
 
 
 @dataclass
 class ExtPsdDriftCorrection:
-    """Exact correction kernels for PSD drift compensation.
+    """Exact correction kernels for PSD drift compensation."""
 
-    Computes the Minimum-Phase correction kernel K = W_live / W_ref that maps
-    data whitened by the 'live' PSD back to the 'reference' PSD frame.
-
-    Also supports computing the Adjoint kernel K^dagger for re-whitening applications.
-    """
-
-    freqs: np.ndarray
-    psd_ref: np.ndarray
-    psd_live: np.ndarray
+    freqs: Any
+    psd_ref: Any
+    psd_live: Any
     fs: float
     n_fft: Optional[int] = None
 
     def __post_init__(self):
         """Validate inputs."""
-        self.freqs = np.asarray(self.freqs, dtype=float)
-        self.psd_ref = np.asarray(self.psd_ref, dtype=float)
-        self.psd_live = np.asarray(self.psd_live, dtype=float)
+        self.xp = aps.array_namespace(self.freqs)
+
+        self.freqs = self.xp.asarray(self.freqs)
+        self.psd_ref = self.xp.asarray(self.psd_ref)
+        self.psd_live = self.xp.asarray(self.psd_live)
 
         if self.n_fft is None:
-            self.n_fft = 2 * (self.freqs.size - 1)
+            self.n_fft = 2 * (self.freqs.shape[0] - 1)
 
-        if not (self.psd_ref.size == self.psd_live.size == self.freqs.size):
+        if not (self.psd_ref.shape[0] == self.psd_live.shape[0] == self.freqs.shape[0]):
             raise ValueError("PSD and frequency arrays must match in length.")
 
-        # Basic sanitization to prevent div-by-zero or log(0) in kernels
-        self.psd_ref = np.maximum(self.psd_ref, 1e-50)
-        self.psd_live = np.maximum(self.psd_live, 1e-50)
+        # Basic sanitization (max with epsilon)
+        # Using where: where(x < 1e-50, 1e-50, x)
+        self.psd_ref = self.xp.where(self.psd_ref < 1e-50, 1e-50, self.psd_ref)
+        self.psd_live = self.xp.where(self.psd_live < 1e-50, 1e-50, self.psd_live)
 
     @property
     def df(self) -> float:
         """Frequency bin width."""
-        if self.freqs.size > 1:
+        if self.freqs.shape[0] > 1:
             return float(self.freqs[1] - self.freqs[0])
         return 1.0
 
-    def _get_smoothed_ratio(self, smoothing_hz: float) -> np.ndarray:
+    def _get_smoothed_ratio(self, smoothing_hz: float) -> Any:
         """Helper to compute smoothed PSD ratio P_live / P_ref."""
         ratio = self.psd_live / self.psd_ref
         if smoothing_hz > 0:
             sigma_bins = smoothing_hz / self.df
-            ratio = gaussian_filter1d(ratio, sigma=sigma_bins, mode="nearest")
+            # Use array_api_signal's gaussian_filter1d
+            ratio = self.xp.gaussian_filter1d(ratio, sigma=sigma_bins, mode="nearest")
         return ratio
 
     def diagnose_time_aliasing(
-        self, kernel: np.ndarray, threshold: float = 1e-3, tail_fraction: float = 0.05
+        self, kernel: Any, threshold: float = 1e-3, tail_fraction: float = 0.05
     ) -> float:
-        """Check if a causal kernel has wrapped energy at the end of the buffer.
-
-        For a strictly causal filter computed via DFT, the end of the buffer
-        (indices N-1, N-2...) corresponds to negative times. Significant energy
-        here indicates the filter duration exceeds n_fft (Time-Domain Aliasing).
-
-        Args:
-            kernel: The time-domain impulse response.
-            threshold: The warning threshold for the tail energy ratio.
-            tail_fraction: The fraction of the buffer end to check (e.g. 0.05 = last 5%).
-
-        Returns:
-            float: The ratio of (Tail Energy / Total Energy).
-        """
-        N = len(kernel)
+        """Check if a causal kernel has wrapped energy at the end of the buffer."""
+        N = kernel.shape[0]
         n_tail = max(1, int(tail_fraction * N))
 
         # Calculate energy in the 'negative time' region (end of buffer)
-        tail_energy = np.sum(kernel[-n_tail:] ** 2)
-        total_energy = np.sum(kernel**2)
+        # slice: kernel[-n_tail:]
+        tail_slice = kernel[-n_tail:]
+        tail_energy = self.xp.sum(tail_slice**2)
+        total_energy = self.xp.sum(kernel**2)
 
-        if total_energy == 0:
+        if float(total_energy) == 0:
             return 0.0
 
-        ratio = tail_energy / total_energy
+        ratio = float(tail_energy / total_energy)
 
         if ratio > threshold:
             warnings.warn(
@@ -261,49 +249,29 @@ class ExtPsdDriftCorrection:
         window: Optional[WindowSpec] = None,
         truncate_samples: Optional[int] = None,
         check_aliasing: bool = True,
-    ) -> np.ndarray:
-        """Compute the causal correction kernel K(t).
-
-        Algebra:
-            K = W_live * W_ref^-1
-            |K| = sqrt(P_ref / P_live)
-
-        Args:
-            smoothing_hz:
-                Gaussian smoothing width in Hz applied to the ratio P_live/P_ref
-                before kernel computation. Recommended to suppress noise artifacts.
-            window:
-                WindowSpec to apply to the time-domain kernel.
-            truncate_samples:
-                If set, truncates the kernel to this many samples. The kernel is
-                assumed causal (starts at t=0), so this keeps indices [0, N].
-            check_aliasing:
-                If True (default), warns if the kernel has not decayed to zero
-                at the end of the buffer (wrap-around risk).
-
-        Returns:
-            np.ndarray: Time-domain impulse response.
-        """
+    ) -> Any:
+        """Compute the causal correction kernel K(t)."""
         # 1. Compute Ratio and Kernel
-        # MPWhiteningFilter(X) -> H = 1/sqrt(X). We want H = sqrt(P_ref/P_live).
-        # Thus Input X = P_live / P_ref.
         ratio = self._get_smoothed_ratio(smoothing_hz)
         mp_filter = MPWhiteningFilter(psd=ratio, fs=self.fs, n_fft=self.n_fft)
         kernel = mp_filter.impulse_response()
 
-        # 2. Check for Aliasing (before window/truncation hides it)
+        # 2. Check for Aliasing
         if check_aliasing:
             self.diagnose_time_aliasing(kernel)
 
-        # 3. Apply Truncation (Slicing for Causal)
+        # 3. Apply Truncation
         if truncate_samples is not None:
-            if truncate_samples > len(kernel):
-                raise ValueError(f"Truncation {truncate_samples} > N_FFT {len(kernel)}")
+            if truncate_samples > kernel.shape[0]:
+                raise ValueError(
+                    f"Truncation {truncate_samples} > N_FFT {kernel.shape[0]}"
+                )
             kernel = kernel[:truncate_samples]
 
         # 4. Apply Window
         if window is not None:
-            win_arr = window.make(len(kernel), center=0.0)
+            # Pass xp context to window maker
+            win_arr = window.make(kernel.shape[0], center=0.0, xp=self.xp)
             kernel *= win_arr
 
         return kernel
@@ -314,41 +282,14 @@ class ExtPsdDriftCorrection:
         window: Optional[WindowSpec] = None,
         truncate_samples: Optional[int] = None,
         check_aliasing: bool = True,
-    ) -> np.ndarray:
-        """Compute the anti-causal adjoint correction kernel K^dagger(t).
-
-        The adjoint is the time-reverse of the correction kernel: K^dagger(t) = K*(-t).
-        In the frequency domain, this corresponds to conjugation: K^dagger(f) = K(f)*.
-
-        Return Format:
-            Returns the full N_FFT buffer suited for circular convolution / overlap-save.
-            The "energy" of this anti-causal kernel is located at the beginning (index 0)
-            and the end (indices N-1, N-2...) of the array.
-
-        Args:
-            smoothing_hz:
-                Gaussian smoothing width in Hz.
-            window:
-                WindowSpec applied to the physical time axis (0, -dt, -2dt...).
-                This effectively windows indices [0, N-1, N-2...] decaying away from 0.
-            truncate_samples:
-                If set, explicitly zeros out the "middle" of the buffer (the causal
-                region), keeping only the 'truncate_samples' that correspond to the
-                immediate future (t <= 0).
-            check_aliasing:
-                If True, checks the source causal kernel for aliasing before reversal.
-
-        Returns:
-            np.ndarray: Time-domain impulse response (length n_fft).
-        """
+    ) -> Any:
+        """Compute the anti-causal adjoint correction kernel K^dagger(t)."""
         # 1. Compute Ratio
         ratio = self._get_smoothed_ratio(smoothing_hz)
 
         # 2. Get Causal Kernel in Frequency Domain
         mp_filter = MPWhiteningFilter(psd=ratio, fs=self.fs, n_fft=self.n_fft)
 
-        # Check source aliasing implicitly by checking the time domain equivalent?
-        # Efficiently: We can check the time domain kernel if requested.
         if check_aliasing:
             k_temp = mp_filter.impulse_response()
             self.diagnose_time_aliasing(k_temp)
@@ -356,41 +297,62 @@ class ExtPsdDriftCorrection:
         K_f = mp_filter.frequency_response()
 
         # 3. Compute Adjoint in Freq Domain (Conjugate)
-        K_adj_f = np.conj(K_f)
+        K_adj_f = self.xp.conj(K_f)
 
         # 4. Transform to Time Domain (Full Buffer)
-        k_adj_t = np.fft.irfft(K_adj_f, n=self.n_fft)
+        k_adj_t = self.xp.fft.irfft(K_adj_f, n=self.n_fft)
 
         # 5. Apply Window / Truncation Logic
-        # For anti-causal, valid times are t=0, -1, -2...
-        # In buffer indices: 0, N-1, N-2...
-        # We construct a full-length window mask.
-
-        N = len(k_adj_t)
-
-        # Determine active region length
+        N = k_adj_t.shape[0]
         L = truncate_samples if truncate_samples is not None else N
 
         # Build the mask/window array
-        mask = np.zeros(N, dtype=float)
+        mask = self.xp.zeros(N, dtype=k_adj_t.dtype)
 
         if window is not None:
-            # Generate window of length L (e.g. Tukey)
-            # This window applies to time 0...L-1 (magnitude).
-            # We map this to buffer indices 0, N-1, N-2...
-            w_taps = window.make(L, center=0.0)
+            # Generate window of length L
+            w_taps = window.make(L, center=0.0, xp=self.xp)
 
             # Apply w[0] to k[0]
-            mask[0] = w_taps[0]
+            # Since array api doesn't support scalar item assignment easily for JAX,
+            # we typically construct by parts or use .at[].set.
+            # However, for 1D arrays, concatenation is safe.
 
-            # Apply w[1..L-1] to k[N-1..N-(L-1)] (reverse order in buffer)
+            # We need to construct mask: [w[0], 0...0, w[L-1]...w[1]]
+
+            # w[0]
+            m0 = w_taps[0:1]
+
             if L > 1:
-                mask[N - (L - 1) :] = w_taps[1:][::-1]
+                # w[1:] reversed
+                w_rev = self.xp.flip(w_taps[1:], axis=0)
+
+                # zeros in middle
+                # indices: 1 to N-(L-1) are zeros.
+                # len = N - 1 - (L - 1) = N - L
+                n_zeros = N - L
+                zeros = self.xp.zeros(n_zeros, dtype=mask.dtype)
+
+                mask = self.xp.concat([m0, zeros, w_rev], axis=0)
+            else:
+                # L=1, just w[0] and zeros
+                zeros = self.xp.zeros(N - 1, dtype=mask.dtype)
+                mask = self.xp.concat([m0, zeros], axis=0)
+
         else:
-            # Rectangular window (truncation only)
-            mask[0] = 1.0
+            # Rectangular window
+            # mask[0] = 1, mask[-(L-1):] = 1
+            one = self.xp.ones(1, dtype=mask.dtype)
+
             if L > 1:
-                mask[N - (L - 1) :] = 1.0
+                n_zeros = N - L
+                zeros = self.xp.zeros(n_zeros, dtype=mask.dtype)
+                # end part is ones of length L-1
+                ones_end = self.xp.ones(L - 1, dtype=mask.dtype)
+                mask = self.xp.concat([one, zeros, ones_end], axis=0)
+            else:
+                zeros = self.xp.zeros(N - 1, dtype=mask.dtype)
+                mask = self.xp.concat([one, zeros], axis=0)
 
         # Apply mask
         k_adj_t *= mask
@@ -399,28 +361,14 @@ class ExtPsdDriftCorrection:
 
     def compute_bias_measurements(
         self,
-        h_tilde: np.ndarray,
+        h_tilde: Any,
         smoothing_hz: float = 0.0,
     ) -> TimePhaseCorrection:
-        """Calculate exact scalar biases (dt, dphi, dsnr) by maximizing the
-        inner product (Matched Filter overlap).
+        """Calculate exact scalar biases (dt, dphi, dsnr)."""
+        # Ensure h_tilde is array
+        h_tilde = self.xp.asarray(h_tilde)
 
-        This method avoids the perturbative approximation by explicitly
-        reconstructing the time-domain overlap between the reference-whitened template
-        and the live-whitened data. Uses sub-sample interpolation for dt.
-
-        Args:
-            h_tilde: Frequency domain waveform template (one-sided).
-            smoothing_hz: Smoothing applied to the PSD ratio for stability.
-
-        Returns:
-            TimePhaseCorrection: A named tuple containing:
-                dt1: Time shift (seconds).
-                dphi1: Phase shift (radians).
-                dsnr1: Fractional SNR change (Horizon distance shift).
-                (dt2, dphi2 are zero).
-        """
-        if h_tilde.shape != self.freqs.shape:
+        if h_tilde.shape[0] != self.freqs.shape[0]:
             raise ValueError("Template h_tilde must match frequencies length.")
 
         # 1. Compute Correction Kernel Spectrum K(f)
@@ -429,26 +377,59 @@ class ExtPsdDriftCorrection:
         K_f = mp.frequency_response()
 
         # 2. Construct Exact Overlap Integrand Z(f)
-        # Z(f) = K(f) * |h(f)|^2 / P_ref(f)
-        template_power_whitened = (np.abs(h_tilde) ** 2) / self.psd_ref
+        template_power_whitened = (self.xp.abs(h_tilde) ** 2) / self.psd_ref
         Z_f = K_f * template_power_whitened
 
-        # 3. Compute Complex Time-Domain Overlap (Analytic Signal)
-        Z_full = np.zeros(self.n_fft, dtype=complex)
-        Z_full[: len(Z_f)] = Z_f
-        z_t = np.fft.ifft(Z_full)
+        # 3. Compute Complex Time-Domain Overlap
+        # Needs padding to full FFT size (Z_f is one-sided)
+        # Z_full construction
+        # Z_f: [DC, 1... Nyq]
+        # We need to reconstruct full symmetric spectrum for IFFT
+        # Or just use irfft if we treat it as real signal?
+        # No, Z(f) is generally complex (phase shift).
 
-        # 4. Find Peak Index and Magnitude
-        abs_z = np.abs(z_t)
-        idx_peak = np.argmax(abs_z)
+        # We assume n_fft is even.
+        # Z_f size is n_fft//2 + 1
+
+        # NOTE: Using standard IFFT on one-sided data usually requires reconstruction.
+        # But 'array-api-signal' doesn't have 'irfft_complex' helper.
+        # We manually construct Z_full.
+        # Z_full[0] = Z_f[0]
+        # Z_full[1:mid] = Z_f[1:-1]
+        # Z_full[mid:] = 0 ?? No.
+
+        # Easier path: Z_t = IFFT(Z_full).
+        # We construct Z_full explicitly.
+
+        z_dc = Z_f[0:1]
+        z_pos = Z_f[1:-1]  # Positive freqs
+        z_nyq = Z_f[-1:]
+
+        # Negative freqs?
+        # Since h(t) and k(t) are real, Z(f) should be hermitian symmetric?
+        # NO. h(t) is real, but if h_tilde is the template, we care about the overlap.
+        # Wait, the method says "Analytic Signal".
+        # If we want the analytic signal overlap, we usually zero out negative freqs.
+
+        # "Z_full[: len(Z_f)] = Z_f; Z_full[others] = 0" implies analytic signal construction.
+        # Let's replicate that logic.
+
+        zeros_len = self.n_fft - Z_f.shape[0]
+        zeros = self.xp.zeros(zeros_len, dtype=Z_f.dtype)
+        Z_full = self.xp.concat([Z_f, zeros], axis=0)
+
+        z_t = self.xp.fft.ifft(Z_full)
+
+        # 4. Find Peak
+        abs_z = self.xp.abs(z_t)
+        idx_peak = int(self.xp.argmax(abs_z))
 
         # 5. Sub-Sample Interpolation for dt
-        # Quadratic interpolation around peak using magnitude
-        y1 = abs_z[idx_peak - 1]
-        y2 = abs_z[idx_peak]
-        y3 = abs_z[(idx_peak + 1) % self.n_fft]
+        # Need scalar access
+        y1 = float(abs_z[idx_peak - 1])
+        y2 = float(abs_z[idx_peak])
+        y3 = float(abs_z[(idx_peak + 1) % self.n_fft])
 
-        # Parabolic peak location: delta in [-0.5, 0.5]
         denom = 2 * (2 * y2 - y1 - y3)
         if denom != 0:
             delta = (y1 - y3) / denom
@@ -457,35 +438,20 @@ class ExtPsdDriftCorrection:
 
         exact_idx = idx_peak + delta
 
-        # Handle wrap-around for negative times
         if exact_idx > self.n_fft // 2:
             dt_exact = (exact_idx - self.n_fft) / self.fs
         else:
             dt_exact = exact_idx / self.fs
 
-        # 6. Extract Phase (at nearest peak is robust enough for comparison)
-        dphi_exact = np.angle(z_t[idx_peak])
+        # 6. Extract Phase
+        dphi_exact = float(self.xp.angle(z_t[idx_peak]))
 
-        # 7. Exact Fractional SNR Change (Comparison to Perturbative)
-        # Perturbative dSNR calculates the Horizon Shift: (Rho_live - Rho_ref) / Rho_ref
-        # Exact calculation:
-        # Rho_ref = sqrt( integral |h|^2 / P_ref )
-        # Rho_live = sqrt( integral |h|^2 / P_live )
+        # 7. Exact Fractional SNR Change
+        integ_ref = self.xp.sum((self.xp.abs(h_tilde) ** 2) / self.psd_ref)
+        integ_live = self.xp.sum((self.xp.abs(h_tilde) ** 2) / self.psd_live)
 
-        # We calculate these using the discrete sum consistent with FFT norm
-        # Parseval: Sum |Z_f| ~ Integral... let's work in freq domain to be safe.
-        df = self.df
-        # Factor of 2 for one-sided to two-sided power, but ratio cancels it.
-
-        # rho_sq_ref = 4 * sum( |h|^2 / P_ref ) * df
-        # rho_sq_live = 4 * sum( |h|^2 / P_live ) * df
-
-        # Avoid DC index 0 if needed, but array ops handle it.
-        integ_ref = np.sum((np.abs(h_tilde) ** 2) / self.psd_ref)
-        integ_live = np.sum((np.abs(h_tilde) ** 2) / self.psd_live)
-
-        rho_ref = np.sqrt(integ_ref)
-        rho_live = np.sqrt(integ_live)
+        rho_ref = float(self.xp.sqrt(integ_ref))
+        rho_live = float(self.xp.sqrt(integ_live))
 
         if rho_ref > 0:
             dsnr_exact = (rho_live / rho_ref) - 1.0
