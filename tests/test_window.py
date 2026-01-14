@@ -1,9 +1,9 @@
-"""Test coverage for sgnligo.kernels module.
+"""Test coverage for zlw.window module and its integration with kernels.
+
 Tests include:
-    - unit tests for LPWhiteningFilter and MPWhiteningFilter classes
-    - scientific-validity tests for MPWhiteningFilter using simplified PSD models
-        (Lorentzian, Exponential, Gaussian bump, Power-law)
-    - basic tests for TimePhaseCorrection and MPMPCorrection classes
+    - Unit tests for WindowSpec subclasses (Tukey, Hann, IdentityWindow).
+    - Verification that windowing preserves energy in WhiteningFilter.
+    - Scientific validation comparing manual window application vs API.
 """
 
 import numpy as np
@@ -14,7 +14,7 @@ from zlw.kernels import (
     LPWhiteningFilter,
     MPWhiteningFilter,
 )
-from zlw.window import WindowSpec
+from zlw.window import WindowSpec, Tukey, Hann, IdentityWindow
 
 
 # Helper: find sub-sample peak time and phase of a complex matched-filter output
@@ -62,12 +62,12 @@ class TestWindowingEnergy:
         e0 = float(np.dot(h, h))
 
         # Hann window
-        hw = lp.impulse_response(window=WindowSpec(kind="hann"))
+        hw = lp.impulse_response(window=Hann())
         e1 = float(np.dot(hw, hw))
         assert abs(e0 - e1) / max(e0, 1e-12) < 1e-6
 
         # Tukey window
-        hw2 = lp.impulse_response(window=WindowSpec(kind="tukey", alpha=0.5))
+        hw2 = lp.impulse_response(window=Tukey(alpha=0.5))
         e2 = float(np.dot(hw2, hw2))
         assert abs(e0 - e2) / max(e0, 1e-12) < 1e-6
 
@@ -79,39 +79,39 @@ class TestWindowingEnergy:
         psd = 1.0 + (freqs / 100.0) ** 2
         mp = MPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft)
         h = mp.impulse_response()
-        hw = mp.impulse_response(window=WindowSpec(kind="tukey", alpha=0.2))
+
+        # Use Hann because it tapers immediately from the peak.
+        # Tukey(0.2) is flat for the first ~100 samples, so it effectively
+        # acts as an identity window for short MP filters.
+        hw = mp.impulse_response(window=Hann())
+
         # Shapes differ in L2 sense (but energy is preserved by construction)
         assert np.linalg.norm(h - hw) > 1e-6
 
 
 class TestWindowSpecBasics:
-    """Unit tests for the WindowSpec helper.
+    """Unit tests for the WindowSpec helper subclasses.
 
     These tests validate the behavior of the optional time-domain window
     specification used to taper FIR taps. They do not require running the
     whitening filters themselves.
     """
 
-    def test_none_or_unknown_yields_ones(self):
-        """test"""
+    def test_identity_window_yields_ones(self):
+        """IdentityWindow should return ones."""
         L = 129
-        # kind=None -> identity window
-        w0 = WindowSpec(kind=None).make(L)
+        w0 = IdentityWindow().make(L)
         assert w0.shape == (L,)
         np.testing.assert_allclose(w0, np.ones(L))
 
-        # unknown kind -> identity window
-        w1 = WindowSpec(kind="not-a-real-window").make(L)
-        np.testing.assert_allclose(w1, np.ones(L))
-
     def test_tukey_alpha_clip_and_range(self):
-        """test"""
+        """Test clipping of alpha parameter in Tukey window."""
         L = 257
         # alpha < 0 should be clipped to 0 (rectangular window)
-        w_neg = WindowSpec(kind="tukey", alpha=-1.0).make(L)
+        w_neg = Tukey(alpha=-1.0).make(L)
         assert np.all((w_neg >= 0) & (w_neg <= 1))
         # alpha > 1 should be clipped to 1 (equivalent to Hann)
-        w_big = WindowSpec(kind="tukey", alpha=2.0).make(L)
+        w_big = Tukey(alpha=2.0).make(L)
         assert np.all((w_big >= 0) & (w_big <= 1))
         # internal consistency: alpha=0 yields close to ones
         assert np.isclose(float(np.min(w_neg)), 1.0)
@@ -155,14 +155,14 @@ class TestWindowSpecWithWhiteningFilterSciVal:
         return psd, fs, n_fft
 
     @pytest.mark.parametrize(
-        "spec",
+        "window_obj",
         [
-            ("tukey", 0.1),
-            ("tukey", 0.5),
-            ("hann", None),
+            Tukey(alpha=0.1),
+            Tukey(alpha=0.5),
+            Hann(),
         ],
     )
-    def test_windowed_taps_match_manual_construction(self, smooth_psd, spec):
+    def test_windowed_taps_match_manual_construction(self, smooth_psd, window_obj):
         psd, fs, n_fft = smooth_psd
         mp = MPWhiteningFilter(psd=psd, fs=fs, n_fft=n_fft)
 
@@ -171,19 +171,15 @@ class TestWindowSpecWithWhiteningFilterSciVal:
         e0 = float(np.dot(h0, h0))
 
         # Build the same window as production code and manually apply it
-        kind, alpha = spec
-        if alpha is None:
-            ws = WindowSpec(kind=kind)
-        else:
-            ws = WindowSpec(kind=kind, alpha=alpha)
-        w = ws.make(h0.size)
+        # Note: MP filter has peak_center=0.0
+        w = window_obj.make(h0.size, center=0.0)
         hw_manual = h0 * w
         e1 = float(np.dot(hw_manual, hw_manual))
         if e0 > 0 and e1 > 0:
             hw_manual = hw_manual * np.sqrt(e0 / e1)
 
         # Ask the production code to do the windowing
-        hw_api = mp.impulse_response(window=ws)
+        hw_api = mp.impulse_response(window=window_obj)
 
         # They must be numerically identical within tolerance
         np.testing.assert_allclose(hw_api, hw_manual, rtol=1e-12, atol=1e-12)

@@ -7,6 +7,7 @@ Tests include:
 """
 
 import os
+import warnings
 
 import numpy as np
 import pytest
@@ -15,8 +16,86 @@ from matplotlib import pyplot as plt
 from zlw.kernels import (
     LPWhiteningFilter,
     MPWhiteningFilter,
+    PSDAdmissibilityError,
+    PSDAdmissibilityWarning,
     WhiteningFilter,
 )
+
+
+class TestWhiteningFilterAdmissibility:
+    """Tests for the PSD admissibility validation logic."""
+
+    @pytest.fixture
+    def setup_valid(self):
+        fs = 4096.0
+        n_fft = 4096
+        # A safe, flat PSD
+        psd = np.ones(n_fft // 2 + 1)
+        return psd, fs, n_fft
+
+    def test_strict_positivity_error(self, setup_valid):
+        """PSD containing zeros or negative values must raise an error."""
+        psd, fs, n_fft = setup_valid
+
+        # Inject a zero
+        psd_bad = psd.copy()
+        psd_bad[10] = 0.0
+
+        with pytest.raises(PSDAdmissibilityError, match="strictly positive"):
+            MPWhiteningFilter(psd_bad, fs, n_fft)
+
+        # Inject a negative
+        psd_neg = psd.copy()
+        psd_neg[10] = -1.0
+        with pytest.raises(PSDAdmissibilityError, match="strictly positive"):
+            MPWhiteningFilter(psd_neg, fs, n_fft)
+
+    def test_numerical_underflow_warning(self, setup_valid):
+        """PSD containing tiny values (< 1e-48) must warn about integrator instability."""
+        psd, fs, n_fft = setup_valid
+
+        # Inject a tiny value
+        psd_tiny = psd.copy()
+        psd_tiny[100] = 1e-50
+
+        with pytest.warns(PSDAdmissibilityWarning, match="extremely small values"):
+            MPWhiteningFilter(psd_tiny, fs, n_fft)
+
+    def test_seismic_wall_artifact_warning(self, setup_valid):
+        """PSD with suspiciously quiet DC (relative to 20Hz) must warn."""
+        psd, fs, n_fft = setup_valid
+        # n_fft=4096, fs=4096 => df=1.0 Hz.
+        # 20 Hz is at index 20.
+
+        # Set 20Hz to a "seismic peak" level (e.g. 1.0)
+        # Set DC to something unphysically low (e.g. 1e-5 * peak)
+        # This simulates the "Welch artifact" that causes whitening instability.
+        psd_artifact = psd.copy()
+        psd_artifact[20] = 1.0
+        psd_artifact[0] = 1e-5  # << 0.01 * 1.0
+
+        with pytest.warns(PSDAdmissibilityWarning, match="Low-Frequency Rolloff"):
+            MPWhiteningFilter(psd_artifact, fs, n_fft)
+
+    def test_valid_psd_passes(self, setup_valid):
+        """A physically reasonable PSD should pass without warnings."""
+        psd, fs, n_fft = setup_valid
+
+        # Ensure DC is reasonable relative to 20Hz
+        psd[0] = 1.0
+        psd[20] = 1.0
+
+        # Should not raise
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter(
+                "always"
+            )  # Cause all warnings to always be triggered.
+            MPWhiteningFilter(psd, fs, n_fft)
+            # Filter out unrelated warnings if any
+            relevant = [x for x in w if issubclass(x.category, PSDAdmissibilityWarning)]
+            assert (
+                len(relevant) == 0
+            ), f"Caught unexpected warning: {relevant[0].message}"
 
 
 class TestWhiteningFilterBase:
@@ -243,7 +322,7 @@ class TestMPWhiteningFilterSciValPsdLorentzian:
 
     @pytest.fixture
     def expected_analytic_freq_res(
-            self, expected_analytic_amp, expected_analytic_phase
+        self, expected_analytic_amp, expected_analytic_phase
     ) -> np.ndarray:
         """
         Expected analytic frequency response via bilinear mapping:
@@ -260,9 +339,9 @@ class TestMPWhiteningFilterSciValPsdLorentzian:
         assert np.allclose(amp[mask], expected_analytic_amp[mask], rtol=1e-6, atol=1e-8)
 
     def test_frequency_response(
-            self,
-            high_rate_lorentzian_psd,
-            expected_analytic_freq_res,
+        self,
+        high_rate_lorentzian_psd,
+        expected_analytic_freq_res,
     ):
         """
         1) Sanity‐check vs. folded‐cepstrum reference
@@ -294,8 +373,7 @@ class TestMPWhiteningFilterSciValPsdLorentzian:
         reason="Set SGNLIGO_TEST_SCIVAL_PLOT=1 to display comparison plots",
     )
     def test_plot_comparison(
-            self, high_rate_lorentzian_psd, expected_analytic_amp,
-            expected_analytic_phase
+        self, high_rate_lorentzian_psd, expected_analytic_amp, expected_analytic_phase
     ):
         """Optional helper (not a pytest assertion) to plot analytic vs.
         MPWhiteningFilter amplitude & phase responses over the 20–300 Hz
@@ -407,7 +485,7 @@ class TestMPWhiteningFilterSciValPsdExponential:
         series_sum = np.sum(sin_terms, axis=0)
 
         # scale factor: -1/(π^2 f0 T)
-        factor = -1.0 / (np.pi ** 2 * f0 * T)
+        factor = -1.0 / (np.pi**2 * f0 * T)
         phi = factor * series_sum
 
         # ensure phase is in [-π, π] if desired:
@@ -450,8 +528,7 @@ class TestMPWhiteningFilterSciValPsdExponential:
         reason="Set SGNLIGO_TEST_SCIVAL_PLOT=1 to display comparison plots",
     )
     def test_plot_comparison(
-            self, high_rate_exponential_psd, expected_analytic_amp,
-            expected_analytic_phase
+        self, high_rate_exponential_psd, expected_analytic_amp, expected_analytic_phase
     ):
         """Optional helper: plot analytic vs. MPWhiteningFilter responses (
         20–300 Hz)."""
@@ -566,7 +643,7 @@ class TestMPWhiteningFilterSciValPsdGaussianBump:
 
     @pytest.fixture
     def expected_analytic_freq_res(
-            self, expected_analytic_amp, expected_analytic_phase
+        self, expected_analytic_amp, expected_analytic_phase
     ):
         return expected_analytic_amp * np.exp(1j * expected_analytic_phase)
 
@@ -578,7 +655,7 @@ class TestMPWhiteningFilterSciValPsdGaussianBump:
         assert np.allclose(amp[mask], expected_analytic_amp[mask], rtol=1e-6, atol=1e-8)
 
     def test_frequency_response(
-            self, high_rate_gaussian_psd, expected_analytic_freq_res
+        self, high_rate_gaussian_psd, expected_analytic_freq_res
     ):
         psd, fs, n_fft, freqs, f0, bw, alpha = high_rate_gaussian_psd
         mp = MPWhiteningFilter(psd, fs, n_fft)
@@ -604,7 +681,7 @@ class TestMPWhiteningFilterSciValPsdGaussianBump:
         reason="Set SGNLIGO_TEST_SCIVAL_PLOT=1 to display comparison plots",
     )
     def test_plot_comparison(
-            self, high_rate_gaussian_psd, expected_analytic_amp, expected_analytic_phase
+        self, high_rate_gaussian_psd, expected_analytic_amp, expected_analytic_phase
     ):
         """Optional helper: compare analytic vs. MPWhiteningFilter responses."""
         psd, fs, n_fft, freqs, f0, bw, alpha = high_rate_gaussian_psd
@@ -703,7 +780,7 @@ class TestMPWhiteningFilterSciValPsdPowerLaw:
 
     @pytest.fixture
     def expected_analytic_freq_res(
-            self, expected_analytic_amp, expected_analytic_phase
+        self, expected_analytic_amp, expected_analytic_phase
     ):
         return expected_analytic_amp * np.exp(1j * expected_analytic_phase)
 
@@ -715,9 +792,9 @@ class TestMPWhiteningFilterSciValPsdPowerLaw:
         assert np.allclose(amp[mask], expected_analytic_amp[mask], rtol=1e-6, atol=1e-8)
 
     def test_frequency_response(
-            self,
-            high_rate_powerlaw_psd,
-            expected_analytic_freq_res,
+        self,
+        high_rate_powerlaw_psd,
+        expected_analytic_freq_res,
     ):
         """
         1) Sanity‐check vs. folded‐cepstrum reference
@@ -735,9 +812,9 @@ class TestMPWhiteningFilterSciValPsdPowerLaw:
         )
 
     def test_phase_response(
-            self,
-            high_rate_powerlaw_psd,
-            expected_analytic_phase,
+        self,
+        high_rate_powerlaw_psd,
+        expected_analytic_phase,
     ):
         psd, fs, n_fft, freqs, A, gamma = high_rate_powerlaw_psd
         mp = MPWhiteningFilter(psd, fs, n_fft)
@@ -752,7 +829,7 @@ class TestMPWhiteningFilterSciValPsdPowerLaw:
         reason="Set SGNLIGO_TEST_SCIVAL_PLOT=1 to display comparison plots",
     )
     def test_plot_comparison(
-            self, high_rate_powerlaw_psd, expected_analytic_amp, expected_analytic_phase
+        self, high_rate_powerlaw_psd, expected_analytic_amp, expected_analytic_phase
     ):
         """Optional helper: compare analytic vs. MPWhiteningFilter responses."""
         import matplotlib.pyplot as plt
