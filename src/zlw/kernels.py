@@ -46,6 +46,7 @@ class WhiteningFilter:
     psd: Any  # Supports any Array API array
     fs: float
     n_fft: Optional[int] = None
+    admissibility_epsilon: float = 1e-60
 
     def __post_init__(self):
         """Validate PSD length and infer n_fft if necessary."""
@@ -76,14 +77,14 @@ class WhiteningFilter:
         min_val = float(self.xp.min(self.psd))
 
         # 1. Check for Non-Positive Values
-        if min_val <= 0:
+        if min_val <= self.admissibility_epsilon:
             raise PSDAdmissibilityError(
                 f"PSD must be strictly positive. Found min value {min_val}. "
                 "Whitening requires division by sqrt(PSD), which is undefined for <= 0."
             )
 
         # 2. Check for Numerical Underflow / Singularities
-        critical_floor = 1e-48
+        critical_floor = 10 * self.admissibility_epsilon
         if min_val < critical_floor:
             warnings.warn(
                 f"PSD contains extremely small values (< {critical_floor}). "

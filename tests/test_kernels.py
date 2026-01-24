@@ -50,13 +50,20 @@ class TestWhiteningFilterAdmissibility:
         with pytest.raises(PSDAdmissibilityError, match="strictly positive"):
             MPWhiteningFilter(psd_neg, fs, n_fft)
 
+        # Inject noisy zero at DC
+        psd_bad = psd.copy()
+        psd_bad[0] = 1e-62
+
+        with pytest.raises(PSDAdmissibilityError, match="strictly positive"):
+            MPWhiteningFilter(psd_bad, fs, n_fft)
+
     def test_numerical_underflow_warning(self, setup_valid):
         """PSD containing tiny values (< 1e-48) must warn about integrator instability."""
         psd, fs, n_fft = setup_valid
 
         # Inject a tiny value
         psd_tiny = psd.copy()
-        psd_tiny[100] = 1e-50
+        psd_tiny[100] = 1.5e-60
 
         with pytest.warns(PSDAdmissibilityWarning, match="extremely small values"):
             MPWhiteningFilter(psd_tiny, fs, n_fft)
